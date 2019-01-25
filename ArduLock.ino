@@ -2,11 +2,8 @@
 #include "WiFiEsp.h"
 #include <EEPROM.h>      //Per Gestione EEPROM
 
-// Emulate Serial2 on pins 6/7 if not present
-#ifndef HAVE_HWSerial2
-#include "SoftwareSerial.h"
+//#include "SoftwareSerial.h"
 //SoftwareSerial Serial2(6, 7); // RX, TX
-#endif
 
 #define SERIALE "01240009480124000966"
 #define BUTTONAP    8
