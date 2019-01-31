@@ -5,7 +5,9 @@
 //#include "SoftwareSerial.h"
 //SoftwareSerial Serial2(6, 7); // RX, TX
 
-#define SERIALE "01240009480124000966"
+#define URISERVER   "3.89.126.2"
+#define PORTASERVER 9100
+#define SERIALE     "01240009480124000966"
 #define BUTTONAP    8
 #define LEDAP       9
 #define LEDALLARME  4
@@ -19,10 +21,9 @@ char *ssid;
 char *pass;
 int status = WL_IDLE_STATUS;// Wifi radio's status
 char MYssid[] = "ArduLock";
-//char MYpass[] = "0000";
 
 char *serverWIFI;
-int porta = 9100;
+int porta;
 boolean serialeInviatoAlServer=false;
 boolean allarmeAttivoZona1=false;
 boolean allarmeAttivoZona2=false;
@@ -33,9 +34,9 @@ WiFiEspServer server(80);
 
 RingBuffer buf(8);
 
-String jsonServerFirstConfiguration = "";
+String jsonServerFirstConfiguration = ""; //"{\"Seriale\":\"01240009480124000966\",\"email\":\"pippo@baudo.it\",\"label1\":\"Cucina\",\"label2\":\"Soggiorno\",\"password\":\"lalala\"}";
 
-void(* Riavvia)(void) = 0;
+//void(* Riavvia)(void) = 0;
 
 void setup()
 {
@@ -84,6 +85,8 @@ void setup()
   }
   //------------------------------ FINE Controllo che l'input sia HIGH (pulsante premuto)
 
+  serverWIFI = URISERVER;
+  porta = PORTASERVER;
   LeggiMemoria();
   //Serial2.println("AT+UART_DEF=57600,8,1,0,0");
   //Tento la connessione alla rete WiFi
@@ -99,15 +102,15 @@ void setup()
   printWifiStatus();
   Serial.println();
   
-  tentaConnessione();
-
-  Serial.print("JSON Prima Config: ");
-  Serial.println(jsonServerFirstConfiguration);
+  //Serial.print("JSON Prima Config: ");
+  //Serial.println(jsonServerFirstConfiguration);
 
   if (jsonServerFirstConfiguration != "") {
-    inviaPrimaConfigigurazioneAlServer();
+    inviaPrimaConfigigurazioneAlServer(); 
     jsonServerFirstConfiguration = "";
   }
+
+  tentaConnessione();
   
   AttivaDisattivaAllarme(false, 1);
   AttivaDisattivaAllarme(false, 2);
@@ -136,9 +139,11 @@ void loopProva() {
 void loop()
 {
   if (allarmeInCorso) {
+    //pulsante di disattivazione manuale
     if (digitalRead(BUTTONAP) == HIGH) {
       AttivaDisattivaAllarme(false, 1);
       AttivaDisattivaAllarme(false, 2);
+      inviaLog("DIS-MAN");
     }
   } else {
     if(allarmeAttivoZona1) {
@@ -149,7 +154,7 @@ void loop()
         Serial.println("pin 1 alto !");
         digitalWrite(LEDALLARME, HIGH);
         digitalWrite(BUZZER, HIGH);
-        inviaLog("P1ALTO");
+        inviaLog("Z1-ALARM");
       }
     }
 
@@ -161,7 +166,7 @@ void loop()
         Serial.println("pin 2 alto !");
         digitalWrite(LEDALLARME, HIGH);
         digitalWrite(BUZZER, HIGH);
-        inviaLog("P2ALTO");
+        inviaLog("Z2-ALARM");
       }
     }
   }
@@ -202,7 +207,6 @@ void AttivaDisattivaAllarme(boolean attivare, int zona) {
     digitalWrite(LEDALLARME, LOW);
     digitalWrite(BUZZER, LOW);
     allarmeInCorso = false;
-    inviaLog("Disatt");
   }
 }
 
@@ -344,15 +348,35 @@ boolean inviaPrimaConfigigurazioneAlServer() {
   String resp;
   
   Serial.print("Invio "); Serial.println(jsonServerFirstConfiguration);
-  client.print(jsonServerFirstConfiguration);
+  //client.print(jsonServerFirstConfiguration);
+
+  while(!client.connect(serverWIFI, 5000)) {
+    delay(20000);
+  }
+  Serial.println("Connesso al Server");
+
+  delay(500);
+
+  client.flush();
+  client.println("POST /SubmitNewArduino HTTP/1.1");              
+  client.println("Access-Control-Allow-Origin: *");
+  client.println("Content-Type: application/json");
+  client.print("Content-Length: ");
+  client.println(jsonServerFirstConfiguration.length()); 
+  client.println("");
+  client.println(jsonServerFirstConfiguration);
 
   //Attendo Risposta
-  delay(500);
-  long int time = millis();
+  //delay(500);
+  //long int time = millis();
+
+  //client.flush();
   
-  while (((time + timeout) > millis()) && (risposto == false)) {
-    if (client.available()) {
-      resp = client.readStringUntil('}');
+  //while (((time + timeout) > millis()) && (risposto == false)) {
+  //  if (client.available()) {
+  //    Serial.print("AVAIABLE");
+  //    Serial.write(client.read());
+      /*resp = client.readStringUntil('}');
       resp += "}";
       Serial.println(resp);
       risposto = true;
@@ -367,13 +391,18 @@ boolean inviaPrimaConfigigurazioneAlServer() {
           //zona1Abilitata = root["Zona1Abilitata"];
           //zona2Abilitata = root["Zona2Abilitata"];
         }
-      }
-    }
-  }
+      }*/
+  //  }
+  //}
 
-  Serial.println((String)"Esito " + esito);
-  return esito;
-  
+  delay(2000);
+
+  client.stop();
+
+  delay(2000);
+
+  Serial.println("Riavvio");
+  return true;
 }
 
 boolean inviaLog(String descLog) {
@@ -481,7 +510,7 @@ void loopAP() {
               client.println("Content-Type: application/json");
               client.println("");
             } else {
-              ScriviInMemoria(root["SSID"], root["pwd"], root["IPserver"]);
+              ScriviInMemoria(root["SSID"], root["pwd"], root["IPserver"], root["porta"]);
               client.flush();
   
               client.println("POST / HTTP/1.1 200 OK");              
@@ -490,14 +519,19 @@ void loopAP() {
               client.println("");
               client.println("{\"Seriale\":" SERIALE ", \"Esito\":\"OK\"}");
               client.println("");
-              
-              jsonServerFirstConfiguration = jBuff;
+
+              jsonServerFirstConfiguration = "";
+              JsonObject& root2 = jsonBuffer.createObject();
+              root2["Seriale"] = SERIALE;
+              root2["email"] = root["email"];
+              root2["label1"] = root["label1"];
+              root2["label2"] = root["label2"];
+              root2["password"] = root["password"];
+              root2.printTo(jsonServerFirstConfiguration);
+
               delay(1000);
-              //setup();
-              //Riavvia();
-              status = WL_IDLE_STATUS;// Wifi radio's status
+              status = WL_IDLE_STATUS;
               WiFi.reset();
-              //server.end();
               setup();
               return;
             }
@@ -532,24 +566,30 @@ void LeggiMemoria() {
   pass = new char[appStr.length()+1];
   appStr.toCharArray(pass, appStr.length()+1);
 
-  for (i = 101, appStr = ""; i < 116; appStr += (char)EEPROM.read(i++));
-  appStr.trim();
-  serverWIFI = new char[appStr.length()+1];
-  appStr.toCharArray(serverWIFI, appStr.length()+1);
+  //for (i = 101, appStr = ""; i < 116; appStr += (char)EEPROM.read(i++));
+  //appStr.trim();
+  //serverWIFI = new char[appStr.length()+1];
+  //appStr.toCharArray(serverWIFI, appStr.length()+1);
+
+  //for (i = 116, appStr = ""; i < 121; appStr += (char)EEPROM.read(i++));
+  //appStr.trim();
+  //porta = appStr.toInt();
 }
 
-void ScriviInMemoria(String strSSID, String strPass, String strServer) {
+void ScriviInMemoria(String strSSID, String strPass, String strServer, String strPorta) {
   int i, j; 
   String appStr = "";
 
-  Serial.print("Memorizzo i seguenti valori:  ");
-  Serial.print(strSSID);    Serial.print(" ");
-  Serial.print(strPass);  Serial.print(" ");
-  Serial.println(strServer);
+  Serial.print("Memorizzo i seguenti valori: ");
+  Serial.print(strSSID);    Serial.print("-");
+  Serial.print(strPass);    Serial.print("-");
+  Serial.print(strServer);  Serial.print("-");
+  Serial.println(strPorta);
   
   appStr += strSSID + Spazi(50 - strSSID.length());
   appStr += strPass + Spazi(50 - strPass.length());
-  appStr += strServer + Spazi(15 - strServer.length());  
+  appStr += strServer + Spazi(15 - strServer.length());
+  appStr += strPorta + Spazi(6 - strPorta.length());  
   
   for (i = 1, j = 0; j < appStr.length(); i++, j++)
     EEPROM.write(i, (int)appStr.charAt(j));
